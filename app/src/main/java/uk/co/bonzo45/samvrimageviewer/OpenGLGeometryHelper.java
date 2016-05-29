@@ -120,7 +120,7 @@ public class OpenGLGeometryHelper {
         GLES20.glEnableVertexAttribArray(normalOpenGLParam);
         GLES20.glEnableVertexAttribArray(colorOpenGLParam);
 
-        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, 24);
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexBuffer.capacity() / 3);
         Utility.checkGLError(name, "Draw");
     }
 }
