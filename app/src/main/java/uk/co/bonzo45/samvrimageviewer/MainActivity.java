@@ -16,7 +16,7 @@ import com.google.vr.sdk.base.Viewport;
 
 import javax.microedition.khronos.egl.EGLConfig;
 
-public class MainActivity extends GvrActivity implements GvrView.StereoRenderer {
+public class MainActivity extends GvrActivity implements GvrView.StereoRenderer, InteractionCallback {
 
     // Constants
     private static final String TAG = "SamMainActivity"; // For logging.
@@ -128,9 +128,10 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer 
         headTransform.getHeadView(headView, 0);
 
         // See if we're looking at things:
-        if (isLookingAtObject(octogon1.modelMatrix, camera, headView, 0.1f, 0.1f)) {
-            Log.i(TAG, "Looking at Octogon 1");
-        }
+        Matrix.multiplyMM(viewMatrix, 0, headView, 0, camera, 0);
+        long time = System.currentTimeMillis();
+        octogon1.updateBeingLookedAt(viewMatrix, 0.1f, 0.1f, time, this, 1);
+        octogon2.updateBeingLookedAt(viewMatrix, 0.1f, 0.1f, time, this, 2);
 
         // Update the 3d audio engine with the most recent head rotation.
         headTransform.getQuaternion(headRotation, 0);
@@ -315,33 +316,25 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer 
     public void onCardboardTrigger() {
         Log.i(TAG, "onCardboardTrigger");
 
-        Log.i(TAG, "Camera before reset: (" + camera[0] + ", " + camera[1] + ", " + camera[2] + ")");
         // Point the user at the box again.
         Matrix.invertM(camera, 0, headView, 0);
         Matrix.rotateM(camera, 0, 180, 0.0f, 1.0f, 0.0f);
+
         // Always give user feedback.
         vibrator.vibrate(50);
     }
 
-    /**
-     * Check if user is looking at object by calculating where the object is in eye-space.
-     *
-     * @return true if the user is looking at the object.
-     */
-    private boolean isLookingAtObject(float[] modelMatrix, float[] cameraMatrix, float[] viewMatrix, float pitchLimit, float yawLimit) {
-        // Convert object space to camera space. Use the headView from onNewFrame.
-        float[] modelViewMatrix = new float[16];
-        Matrix.multiplyMM(modelViewMatrix, 0, cameraMatrix, 0, modelMatrix, 0);
-        Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelViewMatrix, 0);
-
-        float[] POS_MATRIX_MULTIPLY_VEC = {0, 0, 0, 1.0f};
-        Matrix.multiplyMV(tempPosition, 0, modelViewMatrix, 0, POS_MATRIX_MULTIPLY_VEC, 0);
-
-        float pitch = (float) Math.atan2(tempPosition[1], -tempPosition[2]);
-        float yaw = (float) Math.atan2(tempPosition[0], -tempPosition[2]);
-
-        Log.i(TAG, "Pitch: " + pitch + ", Yaw: " + yaw);
-
-        return Math.abs(pitch) < pitchLimit && Math.abs(yaw) < yawLimit;
+    @Override
+    public void handleCallback(int identifier) {
+        switch (identifier) {
+            case 1:
+                Log.i(TAG, "Previous Photo");
+                break;
+            case 2:
+                Log.i(TAG, "Next Photo");
+                break;
+            default:
+                Log.i(TAG, "Unknown Callback ID");
+        }
     }
 }
