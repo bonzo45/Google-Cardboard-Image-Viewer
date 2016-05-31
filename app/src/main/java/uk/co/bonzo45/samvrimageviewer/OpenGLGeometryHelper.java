@@ -44,6 +44,12 @@ public class OpenGLGeometryHelper {
     public boolean beingLookedAt;
     public static final long INTERACTION_TIME = 1000;
 
+    // Texture Stuff
+    boolean usingTexture;
+    public FloatBuffer textureCoordinatesBuffer;
+    public int textureResourceID;
+    public int textureOpenGLParam;
+    public int textureCoordinateOpenGLParam;
 
     public OpenGLGeometryHelper(float[] vertices, float[] colours, float[] normals, int vertexShader, int fragmentShader, String name) {
         this.name = name;
@@ -91,6 +97,24 @@ public class OpenGLGeometryHelper {
         Utility.checkGLError(name, "Program Parameters");
     }
 
+    public void setTexture(int texture, float[] textureCoordinates) {
+        usingTexture = true;
+
+        textureResourceID = texture;
+
+        // Create a buffer to store the texture coordinates of the square.
+        ByteBuffer textureCoordinatesByteBuffer = ByteBuffer.allocateDirect(textureCoordinates.length * 4);
+        textureCoordinatesByteBuffer.order(ByteOrder.nativeOrder());
+        textureCoordinatesBuffer = textureCoordinatesByteBuffer.asFloatBuffer();
+        textureCoordinatesBuffer.put(textureCoordinates);
+        textureCoordinatesBuffer.position(0);
+
+        textureOpenGLParam = GLES20.glGetUniformLocation(openGLProgram, "u_Texture");
+        textureCoordinateOpenGLParam = GLES20.glGetAttribLocation(openGLProgram, "a_TexCoordinate");
+
+        Utility.checkGLError(name, "Texture Parameters");
+    }
+
     /**
      * Draw the shape.
      *
@@ -103,6 +127,18 @@ public class OpenGLGeometryHelper {
         Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0);
 
         GLES20.glUseProgram(openGLProgram);
+
+        if (usingTexture) {
+            // Set the active texture unit to texture unit 0.
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+            // Bind the texture to this unit.
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureResourceID);
+            // Tell the texture uniform sampler to use this texture in the shader by binding to texture unit 0.
+            GLES20.glUniform1i(textureOpenGLParam, 0);
+
+            GLES20.glVertexAttribPointer(textureCoordinateOpenGLParam, 2, GLES20.GL_FLOAT, false, 0, textureCoordinatesBuffer);
+            GLES20.glEnableVertexAttribArray(textureCoordinateOpenGLParam);
+        }
 
         GLES20.glUniform3fv(lightPositionOpenGLParam, 1, lightPositionInEyeSpace, 0);
 
