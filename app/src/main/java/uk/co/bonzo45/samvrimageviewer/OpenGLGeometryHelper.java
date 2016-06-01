@@ -20,9 +20,8 @@ public class OpenGLGeometryHelper {
     // OpenGL Program
     public int openGLProgram;
 
-    // Buffers to hold vertices, colours & normals.
+    // Buffers to hold vertices & normals.
     public FloatBuffer vertexBuffer;
-    public FloatBuffer colourBuffer;
     public FloatBuffer normalBuffer;
 
     // Model Matrix (Object Space to World Space)
@@ -30,19 +29,18 @@ public class OpenGLGeometryHelper {
 
     // OpenGL Parameter Identifiers.
     public int positionOpenGLParam;
-    public int colorOpenGLParam;
     public int normalOpenGLParam;
 
     public int modelOpenGLParam;
     public int modelViewOpenGLParam;
     public int modelViewProjectionOpenGLParam;
 
+    // Light
     public int lightPositionOpenGLParam;
 
-    // Time (for animation/being looked at)
-    public long timeLookedAt;
-    public boolean beingLookedAt;
-    public static final long INTERACTION_TIME = 1000;
+    // Colour Stuff
+    public FloatBuffer colourBuffer;
+    public int colourOpenGLParam;
 
     // Texture Stuff
     boolean usingTexture;
@@ -51,7 +49,12 @@ public class OpenGLGeometryHelper {
     public int textureOpenGLParam;
     public int textureCoordinateOpenGLParam;
 
-    public OpenGLGeometryHelper(float[] vertices, float[] colours, float[] normals, int vertexShader, int fragmentShader, String name) {
+    // Time (for animation/being looked at)
+    public long timeLookedAt;
+    public boolean beingLookedAt;
+    public static final long INTERACTION_TIME = 1000;
+
+    public OpenGLGeometryHelper(float[] vertices, float[] normals, int vertexShader, int fragmentShader, String name) {
         this.name = name;
 
         modelMatrix = new float[16];
@@ -62,13 +65,6 @@ public class OpenGLGeometryHelper {
         vertexBuffer = vertexByteBuffer.asFloatBuffer();
         vertexBuffer.put(vertices);
         vertexBuffer.position(0);
-
-        // Create a buffer to store the colours of the square.
-        ByteBuffer colourByteBuffer = ByteBuffer.allocateDirect(colours.length * 4);
-        colourByteBuffer.order(ByteOrder.nativeOrder());
-        colourBuffer = colourByteBuffer.asFloatBuffer();
-        colourBuffer.put(colours);
-        colourBuffer.position(0);
 
         // Create a buffer to store the normals of the square.
         ByteBuffer normalByteBuffer = ByteBuffer.allocateDirect(normals.length * 4);
@@ -88,18 +84,54 @@ public class OpenGLGeometryHelper {
         // Get the OpenGL variable positions.
         positionOpenGLParam = GLES20.glGetAttribLocation(openGLProgram, "a_Position");
         normalOpenGLParam = GLES20.glGetAttribLocation(openGLProgram, "a_Normal");
-        colorOpenGLParam = GLES20.glGetAttribLocation(openGLProgram, "a_Color");
         modelOpenGLParam = GLES20.glGetUniformLocation(openGLProgram, "u_Model");
         modelViewOpenGLParam = GLES20.glGetUniformLocation(openGLProgram, "u_MVMatrix");
         modelViewProjectionOpenGLParam = GLES20.glGetUniformLocation(openGLProgram, "u_MVP");
         lightPositionOpenGLParam = GLES20.glGetUniformLocation(openGLProgram, "u_LightPos");
 
         Utility.checkGLError(name, "Program Parameters");
+
+        setColour(new float[]{1.0f, 1.0f, 1.0f, 1.0f});
     }
 
+    public void setColour(float[] colours) {
+        // If only one colour is given (4 entries) extend it for every vertex.
+        if (colours.length == 4) {
+            float r = colours[0];
+            float g = colours[1];
+            float b = colours[2];
+            float a = colours[3];
+            colours = new float[(vertexBuffer.capacity() / 3) * 4];
+            for (int i = 0; i < colours.length; i +=4) {
+                colours[i] = r;
+                colours[i + 1] = g;
+                colours[i + 2] = b;
+                colours[i + 3] = a;
+            }
+        }
+
+        // Create a buffer to store the colours of the square.
+        ByteBuffer colourByteBuffer = ByteBuffer.allocateDirect(colours.length * 4);
+        colourByteBuffer.order(ByteOrder.nativeOrder());
+        colourBuffer = colourByteBuffer.asFloatBuffer();
+        colourBuffer.put(colours);
+        colourBuffer.position(0);
+
+        // OpenGL Parameters
+        colourOpenGLParam = GLES20.glGetAttribLocation(openGLProgram, "a_Color");
+
+        Utility.checkGLError(name, "Colour Parameters");
+    }
+
+    /**
+     * Optional - applies a texture to the geometry.
+     * @param texture - the resource ID
+     * @param textureCoordinates - coordinates to map the texture to the geometry.
+     */
     public void setTexture(int texture, float[] textureCoordinates) {
         usingTexture = true;
 
+        // Copy texture ID
         textureResourceID = texture;
 
         // Create a buffer to store the texture coordinates of the square.
@@ -109,6 +141,7 @@ public class OpenGLGeometryHelper {
         textureCoordinatesBuffer.put(textureCoordinates);
         textureCoordinatesBuffer.position(0);
 
+        // OpenGL Parameters
         textureOpenGLParam = GLES20.glGetUniformLocation(openGLProgram, "u_Texture");
         textureCoordinateOpenGLParam = GLES20.glGetAttribLocation(openGLProgram, "a_TexCoordinate");
 
@@ -116,18 +149,43 @@ public class OpenGLGeometryHelper {
     }
 
     /**
-     * Draw the shape.
+     * Draw the object.
      *
-     * Given the transformation matrices, pass them into the shader.
+     * Pass through parameters to OpenGL.
      */
     public void draw(float[] viewMatrix, float[] projectionMatrix, float[] lightPositionInEyeSpace) {
+        // Use this OpenGL Program
+        GLES20.glUseProgram(openGLProgram);
+
+        // Compute Model-View and Model-View-Projection Matrices.
         float[] modelViewMatrix = new float[16];
         float[] modelViewProjectionMatrix = new float[16];
         Matrix.multiplyMM(modelViewMatrix, 0, viewMatrix, 0, modelMatrix, 0);
         Matrix.multiplyMM(modelViewProjectionMatrix, 0, projectionMatrix, 0, modelViewMatrix, 0);
 
-        GLES20.glUseProgram(openGLProgram);
+        // Model
+        GLES20.glUniformMatrix4fv(modelOpenGLParam, 1, false, modelMatrix, 0);
 
+        // Model-View
+        GLES20.glUniformMatrix4fv(modelViewOpenGLParam, 1, false, modelViewMatrix, 0);
+
+        // Model-View-Projection
+        GLES20.glUniformMatrix4fv(modelViewProjectionOpenGLParam, 1, false, modelViewProjectionMatrix, 0);
+
+        // Lighting.
+        GLES20.glUniform3fv(lightPositionOpenGLParam, 1, lightPositionInEyeSpace, 0);
+
+        // Vertices & Normals
+        GLES20.glVertexAttribPointer(positionOpenGLParam, COORDS_PER_VERTEX, GLES20.GL_FLOAT, false, 0, vertexBuffer);
+        GLES20.glVertexAttribPointer(normalOpenGLParam, 3, GLES20.GL_FLOAT, false, 0, normalBuffer);
+        GLES20.glEnableVertexAttribArray(positionOpenGLParam);
+        GLES20.glEnableVertexAttribArray(normalOpenGLParam);
+
+        // Colours
+        GLES20.glVertexAttribPointer(colourOpenGLParam, 4, GLES20.GL_FLOAT, false, 0, colourBuffer);
+        GLES20.glEnableVertexAttribArray(colourOpenGLParam);
+
+        // Optional - Texture
         if (usingTexture) {
             // Set the active texture unit to texture unit 0.
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
@@ -139,29 +197,6 @@ public class OpenGLGeometryHelper {
             GLES20.glVertexAttribPointer(textureCoordinateOpenGLParam, 2, GLES20.GL_FLOAT, false, 0, textureCoordinatesBuffer);
             GLES20.glEnableVertexAttribArray(textureCoordinateOpenGLParam);
         }
-
-        GLES20.glUniform3fv(lightPositionOpenGLParam, 1, lightPositionInEyeSpace, 0);
-
-        // Set the Model in the shader, used to calculate lighting
-        GLES20.glUniformMatrix4fv(modelOpenGLParam, 1, false, modelMatrix, 0);
-
-        // Set the ModelView in the shader, used to calculate lighting
-        GLES20.glUniformMatrix4fv(modelViewOpenGLParam, 1, false, modelViewMatrix, 0);
-
-        // Set the position of the
-        GLES20.glVertexAttribPointer(positionOpenGLParam, COORDS_PER_VERTEX, GLES20.GL_FLOAT, false, 0, vertexBuffer);
-
-        // Set the ModelViewProjection matrix in the shader.
-        GLES20.glUniformMatrix4fv(modelViewProjectionOpenGLParam, 1, false, modelViewProjectionMatrix, 0);
-
-        // Set the normal positions of the , again for shading
-        GLES20.glVertexAttribPointer(normalOpenGLParam, 3, GLES20.GL_FLOAT, false, 0, normalBuffer);
-        GLES20.glVertexAttribPointer(colorOpenGLParam, 4, GLES20.GL_FLOAT, false, 0, colourBuffer);
-
-        // Enable vertex arrays
-        GLES20.glEnableVertexAttribArray(positionOpenGLParam);
-        GLES20.glEnableVertexAttribArray(normalOpenGLParam);
-        GLES20.glEnableVertexAttribArray(colorOpenGLParam);
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, vertexBuffer.capacity() / 3);
         Utility.checkGLError(name, "Draw");

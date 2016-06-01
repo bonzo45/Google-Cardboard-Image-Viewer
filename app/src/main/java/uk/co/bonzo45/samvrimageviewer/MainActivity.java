@@ -215,25 +215,25 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         int textureVertexShader = loadGLShader(GLES20.GL_VERTEX_SHADER, R.raw.texture_vertex);
         int textureFragmentShader = loadGLShader(GLES20.GL_FRAGMENT_SHADER, R.raw.texture_fragment);
 
-        square = new OpenGLGeometryHelper(WorldData.SQUARE_COORDS, WorldData.SQUARE_COLOURS, WorldData.SQUARE_NORMALS, textureVertexShader, textureFragmentShader, "Square1");
+        square = new OpenGLGeometryHelper(WorldData.SQUARE_COORDS, WorldData.SQUARE_NORMALS, textureVertexShader, textureFragmentShader, "Square1");
         Matrix.setIdentityM(square.modelMatrix, 0);
         Matrix.translateM(square.modelMatrix, 0, 0.0f, 0.0f, UI_DISTANCE);
         int texture = loadTexture(R.drawable.texture);
         square.setTexture(texture, WorldData.SQUARE_TEXTURE_COORDS);
 
-        octogon1 = new OpenGLGeometryHelper(WorldData.OCTOGON_COORDS, WorldData.OCTOGON_COLOURS, WorldData.OCTOGON_NORMALS, colourVertexShader, passthroughFragmentShader, "Octogon1");
+        octogon1 = new OpenGLGeometryHelper(WorldData.OCTOGON_COORDS, WorldData.OCTOGON_NORMALS, colourVertexShader, passthroughFragmentShader, "Octogon1");
         Matrix.setIdentityM(octogon1.modelMatrix, 0);
         Matrix.rotateM(octogon1.modelMatrix, 0, 25, 0.0f, 1.0f, 0.0f);
         Matrix.translateM(octogon1.modelMatrix, 0, 0.0f, 0.0f, UI_DISTANCE);
         Matrix.scaleM(octogon1.modelMatrix, 0, 0.25f, 0.25f, 0.25f);
 
-        octogon2 = new OpenGLGeometryHelper(WorldData.OCTOGON_COORDS, WorldData.OCTOGON_COLOURS, WorldData.OCTOGON_NORMALS, colourVertexShader, passthroughFragmentShader, "Octogon2");
+        octogon2 = new OpenGLGeometryHelper(WorldData.OCTOGON_COORDS, WorldData.OCTOGON_NORMALS, colourVertexShader, passthroughFragmentShader, "Octogon2");
         Matrix.setIdentityM(octogon2.modelMatrix, 0);
         Matrix.rotateM(octogon2.modelMatrix, 0, -25, 0.0f, 1.0f, 0.0f);
         Matrix.translateM(octogon2.modelMatrix, 0, 0.0f, 0.0f, UI_DISTANCE);
         Matrix.scaleM(octogon2.modelMatrix, 0, 0.25f, 0.25f, 0.25f);
 
-        floor = new OpenGLGeometryHelper(WorldData.FLOOR_COORDS, WorldData.FLOOR_COLORS, WorldData.FLOOR_NORMALS, colourVertexShader, gridFragmentShader, "Floor");
+        floor = new OpenGLGeometryHelper(WorldData.FLOOR_COORDS, WorldData.FLOOR_NORMALS, colourVertexShader, gridFragmentShader, "Floor");
         Matrix.setIdentityM(floor.modelMatrix, 0);
         Matrix.translateM(floor.modelMatrix, 0, 0, -floorDepth, 0); // Floor appears below user.
 
