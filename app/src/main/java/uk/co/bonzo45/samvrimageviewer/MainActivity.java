@@ -5,13 +5,12 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.net.Uri;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
+import android.os.Debug;
 import android.os.Vibrator;
 import android.os.Bundle;
-import android.provider.DocumentsContract;
 import android.support.v4.provider.DocumentFile;
 import android.util.Log;
 
@@ -22,9 +21,10 @@ import com.google.vr.sdk.base.GvrView;
 import com.google.vr.sdk.base.HeadTransform;
 import com.google.vr.sdk.base.Viewport;
 
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
+import java.util.LinkedList;
+import java.util.List;
 
 import javax.microedition.khronos.egl.EGLConfig;
 
@@ -71,10 +71,19 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     private Vibrator vibrator;
 
     // Images
-    Bitmap bitmap;
+    public final static int BITMAP_CACHE_SIZE = 5;
+
+    private int imagesInFolder;
+
+    List<Bitmap> bitmapCache;
+    private int bitmapsInCache;
+    private int bitmapCurrent;
+    private int bitmapCacheStart;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        Debug.startMethodTracing("onCreate");
+
         Log.i(TAG, "onCreate called.");
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
@@ -119,6 +128,13 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         // Pick a folder to view images from.
         Intent pickFolderIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         startActivityForResult(pickFolderIntent, 1);
+
+    }
+
+    @Override
+    public void onDestroy() {
+        Debug.stopMethodTracing();
+        super.onDestroy();
     }
 
     @Override
@@ -233,7 +249,9 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         square = new OpenGLGeometryHelper(WorldData.SQUARE_COORDS, WorldData.SQUARE_NORMALS, textureVertexShader, textureFragmentShader, "Square1");
         Matrix.setIdentityM(square.modelMatrix, 0);
         Matrix.translateM(square.modelMatrix, 0, 0.0f, 0.0f, UI_DISTANCE);
-        int texture = loadTexture(R.drawable.texture);
+        Bitmap bitmap = bitmapFromResource(R.drawable.texture);
+        int texture = loadTexture(bitmap);
+        bitmap.recycle();
         square.setTexture(texture, WorldData.SQUARE_TEXTURE_COORDS);
 
         octogon1 = new OpenGLGeometryHelper(WorldData.OCTOGON_COORDS, WorldData.OCTOGON_NORMALS, colourVertexShader, passthroughFragmentShader, "Octogon1");
@@ -351,27 +369,25 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         switch (identifier) {
             case 1:
                 Log.i(TAG, "Previous Photo");
+                bitmapCurrent = Math.max(0, bitmapCurrent - 1);
+                square.setTexture(loadTexture(bitmapCache.get(bitmapCurrent)), WorldData.SQUARE_TEXTURE_COORDS);
                 break;
             case 2:
                 Log.i(TAG, "Next Photo");
+                bitmapCurrent = Math.min(bitmapCache.size() - 1, bitmapCurrent + 1);
+                square.setTexture(loadTexture(bitmapCache.get(bitmapCurrent)), WorldData.SQUARE_TEXTURE_COORDS);
                 break;
             default:
                 Log.i(TAG, "Unknown Callback ID");
         }
     }
 
-    public int loadTexture(final int resourceId) {
+    public int loadTexture(Bitmap bitmap) {
         final int[] textureHandle = new int[1];
 
         GLES20.glGenTextures(1, textureHandle, 0);
 
         if (textureHandle[0] != 0) {
-            //final BitmapFactory.Options options = new BitmapFactory.Options();
-            //options.inScaled = false;   // No pre-scaling
-
-            // Read in the resource
-            //final Bitmap bitmap = BitmapFactory.decodeResource(getResources(), resourceId, options);
-
             // Bind to the texture in OpenGL
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0]);
 
@@ -381,9 +397,6 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
 
             // Load the bitmap into the bound texture.
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0);
-
-            // Recycle the bitmap, since its data has been loaded into OpenGL.
-            //bitmap.recycle();
         }
 
         if (textureHandle[0] == 0) {
@@ -393,40 +406,56 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         return textureHandle[0];
     }
 
+    public Bitmap bitmapFromResource(int resourceId) {
+        final BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inScaled = false;   // No pre-scaling
+
+        // Read in the resource
+        return BitmapFactory.decodeResource(getResources(), resourceId, options);
+    }
+
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        // Check which request we're responding to
+        // User has selected (or perhaps not) a folder.
         if (requestCode == 1) {
-            // Make sure the request was successful
+            // Check to see if the user selected a folder (they could have pressed back)
             if (resultCode == RESULT_OK) {
+                // Get the folder that they picked, and all the files in it.
                 DocumentFile folder = DocumentFile.fromTreeUri(getApplicationContext(), data.getData());
-                Log.i(TAG, "You have picked:");
-                Log.i(TAG, "Name: " + folder.getName());
-                Log.i(TAG, "Directory?: " + folder.isDirectory());
-                Log.i(TAG, "Exists?: " + folder.exists());
-                if (folder.isDirectory()) {
-                    DocumentFile[] files = folder.listFiles();
-                    for (DocumentFile file: files) {
-                        if (file.isFile()) {
-                            String mimeType = file.getType();
-                            Log.i(TAG, mimeType);
-                            if (mimeType.startsWith("image/")) {
-                                ContentResolver contentResolver = getContentResolver();
-                                try {
-                                    InputStream inputStream = contentResolver.openInputStream(file.getUri());
-                                    bitmap = BitmapFactory.decodeStream(inputStream);
+                DocumentFile[] files = folder.listFiles();
 
-                                } catch (FileNotFoundException e) {
-                                    e.printStackTrace();
-                                }
+                // Create a cache to store some of the images in the folder.
+                bitmapCache = new LinkedList<Bitmap>();
+                imagesInFolder = 0;
+
+                // Go through each file.
+                for (int i = 0; i < files.length; i++) {
+                    DocumentFile file = files[i];
+                    // If it's an image, add it to the cache (if not full)
+                    if (file.isFile() && file.getType().startsWith("image/")) {
+                        imagesInFolder++;
+                        if (bitmapCache.size() <= BITMAP_CACHE_SIZE) {
+                            try {
+                                InputStream inputStream = getContentResolver().openInputStream(file.getUri());
+                                Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+                                bitmapCache.add(bitmap);
+
+                            } catch (FileNotFoundException e) {
+                                e.printStackTrace();
                             }
                         }
                     }
                 }
-                else {
-                    Log.i(TAG, "You haven't picked a directory somehow.");
+
+                if (bitmapCache.size() >= 1) {
+                    bitmapCacheStart = 1;
+                    bitmapCurrent = 1;
                 }
-                // Do something with the contact here (bigger example below)
+                else {
+                    bitmapCacheStart = 0;
+                    bitmapCurrent = 0;
+                }
             }
         }
     }
