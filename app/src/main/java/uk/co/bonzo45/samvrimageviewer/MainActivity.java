@@ -1,13 +1,18 @@
 package uk.co.bonzo45.samvrimageviewer;
 
+import android.content.ContentResolver;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.net.Uri;
 import android.opengl.GLES20;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
 import android.os.Vibrator;
 import android.os.Bundle;
+import android.provider.DocumentsContract;
+import android.support.v4.provider.DocumentFile;
 import android.util.Log;
 
 import com.google.vr.sdk.audio.GvrAudioEngine;
@@ -16,6 +21,10 @@ import com.google.vr.sdk.base.GvrActivity;
 import com.google.vr.sdk.base.GvrView;
 import com.google.vr.sdk.base.HeadTransform;
 import com.google.vr.sdk.base.Viewport;
+
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.InputStream;
 
 import javax.microedition.khronos.egl.EGLConfig;
 
@@ -61,6 +70,8 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     // Vibrator
     private Vibrator vibrator;
 
+    // Images
+    Bitmap bitmap;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -104,6 +115,10 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         // Initialize 3D audio engine.
         gvrAudioEngine = new GvrAudioEngine(this, GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
         soundPosition = new float[] {0.0f, 0.0f, UI_DISTANCE};
+
+        // Pick a folder to view images from.
+        Intent pickFolderIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        startActivityForResult(pickFolderIntent, 1);
     }
 
     @Override
@@ -351,11 +366,11 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         GLES20.glGenTextures(1, textureHandle, 0);
 
         if (textureHandle[0] != 0) {
-            final BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inScaled = false;   // No pre-scaling
+            //final BitmapFactory.Options options = new BitmapFactory.Options();
+            //options.inScaled = false;   // No pre-scaling
 
             // Read in the resource
-            final Bitmap bitmap = BitmapFactory.decodeResource(getResources(), resourceId, options);
+            //final Bitmap bitmap = BitmapFactory.decodeResource(getResources(), resourceId, options);
 
             // Bind to the texture in OpenGL
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0]);
@@ -368,7 +383,7 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
             GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0);
 
             // Recycle the bitmap, since its data has been loaded into OpenGL.
-            bitmap.recycle();
+            //bitmap.recycle();
         }
 
         if (textureHandle[0] == 0) {
@@ -376,5 +391,43 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         }
 
         return textureHandle[0];
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        // Check which request we're responding to
+        if (requestCode == 1) {
+            // Make sure the request was successful
+            if (resultCode == RESULT_OK) {
+                DocumentFile folder = DocumentFile.fromTreeUri(getApplicationContext(), data.getData());
+                Log.i(TAG, "You have picked:");
+                Log.i(TAG, "Name: " + folder.getName());
+                Log.i(TAG, "Directory?: " + folder.isDirectory());
+                Log.i(TAG, "Exists?: " + folder.exists());
+                if (folder.isDirectory()) {
+                    DocumentFile[] files = folder.listFiles();
+                    for (DocumentFile file: files) {
+                        if (file.isFile()) {
+                            String mimeType = file.getType();
+                            Log.i(TAG, mimeType);
+                            if (mimeType.startsWith("image/")) {
+                                ContentResolver contentResolver = getContentResolver();
+                                try {
+                                    InputStream inputStream = contentResolver.openInputStream(file.getUri());
+                                    bitmap = BitmapFactory.decodeStream(inputStream);
+
+                                } catch (FileNotFoundException e) {
+                                    e.printStackTrace();
+                                }
+                            }
+                        }
+                    }
+                }
+                else {
+                    Log.i(TAG, "You haven't picked a directory somehow.");
+                }
+                // Do something with the contact here (bigger example below)
+            }
+        }
     }
 }
