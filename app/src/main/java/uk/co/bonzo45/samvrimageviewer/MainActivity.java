@@ -1,6 +1,5 @@
 package uk.co.bonzo45.samvrimageviewer;
 
-import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -43,9 +42,6 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     private float[] camera;
     private float[] viewMatrix;
     private float[] headView;
-    private float[] modelViewProjectionMatrix;
-    private float[] modelViewMatrix;
-    private float[] tempPosition;
     private float[] headRotation;
     private final float[] lightPosInEyeSpace = new float[4];
 
@@ -54,7 +50,6 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     protected float[] modelPosition;
 
     // Square, Floor & Octogon
-    OpenGLGeometryHelper square;
     OpenGLGeometryHelper floor;
     OpenGLGeometryHelper octogon1;
     OpenGLGeometryHelper octogon2;
@@ -71,24 +66,49 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     private Vibrator vibrator;
 
     // Images
-    public final static int BITMAP_CACHE_SIZE = 5;
-
     private int imagesInFolder;
+    OpenGLImageManager imageManager;
+    private int currentImage;
 
-    List<Bitmap> bitmapCache;
-    private int bitmapsInCache;
-    private int bitmapCurrent;
-    private int bitmapCacheStart;
+    private final static int MAX_IMAGES_LOADED = 5;
+
+    int textureVertexShader;
+    int textureFragmentShader;
+    List<Bitmap> bitmapList;
+    boolean bitmapListCreated;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        Log.i(TAG, "onCreate called.");
         Debug.startMethodTracing("onCreate");
 
-        Log.i(TAG, "onCreate called.");
         super.onCreate(savedInstanceState);
+
+        // Pick the layout to display.
         setContentView(R.layout.activity_main);
 
-        // Get the GVR View and set the renderer to this activity (which is a StereoRenderer)...
+        setupGvrView();
+
+        setupCamera();
+
+        // Stores where the head is looking.
+        viewMatrix = new float[16];
+        headView = new float[16];
+        headRotation = new float[4];
+
+        // Vibrator (for feedback on Cardboard Button Press)
+        vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+
+        // Initialize 3D audio engine.
+        gvrAudioEngine = new GvrAudioEngine(this, GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
+        soundPosition = new float[] {0.0f, 0.0f, UI_DISTANCE};
+    }
+
+    /**
+     * Sets up the GvrView.
+     */
+    private void setupGvrView() {
+        // Set up the GvrView.
         GvrView gvrView = (GvrView) findViewById(R.id.gvr_view);
         gvrView.setEGLConfigChooser(8, 8, 8, 8, 16, 8);
         gvrView.setVRModeEnabled(false);
@@ -102,33 +122,19 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
                     }
                 });
         setGvrView(gvrView);
+    }
 
+    /**
+     * Initializes the camera matrix.
+     * Positioned at (0, 0, 0).
+     * Pointed in +z direction.
+     */
+    private void setupCamera() {
         camera = new float[16];
-        // Build the camera matrix. Point it in the -z direction.
         float eyeX = 0.0f, eyeY = 0.0f, eyeZ = 0.0f;
-        float lookX = 0.0f, lookY = 0.0f, lookZ = -1.0f;
+        float lookX = 0.0f, lookY = 0.0f, lookZ = 1.0f;
         float upX = 0.0f, upY = 1.0f, upZ = 0.0f;
         Matrix.setLookAtM(camera, 0, eyeX, eyeY, eyeZ, lookX, lookY, lookZ, upX, upY, upZ);
-
-        viewMatrix = new float[16];
-        modelViewMatrix = new float[16];
-        modelViewProjectionMatrix = new float[16];
-
-        tempPosition = new float[4];
-        // Model first appears directly in front of user.
-        //modelPosition = new float[] {0.0f, 0.0f, 10.0f};
-        headRotation = new float[4];
-        headView = new float[16];
-        vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-
-        // Initialize 3D audio engine.
-        gvrAudioEngine = new GvrAudioEngine(this, GvrAudioEngine.RenderingMode.BINAURAL_HIGH_QUALITY);
-        soundPosition = new float[] {0.0f, 0.0f, UI_DISTANCE};
-
-        // Pick a folder to view images from.
-        Intent pickFolderIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
-        startActivityForResult(pickFolderIntent, 1);
-
     }
 
     @Override
@@ -151,15 +157,24 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
 
     /**
      * Called once every frame (before it's drawn)...
-     * @param headTransform
+     * Update Data - Animations - Physics
+     * @param headTransform - where the head is pointing.
      */
     @Override
     public void onNewFrame(HeadTransform headTransform) {
-        headTransform.getHeadView(headView, 0);
-        // Update Data // Animations // Physics
-
         // Get the head position.
         headTransform.getHeadView(headView, 0);
+
+        // Load images for first time.
+        if (bitmapListCreated) {
+            float[] modelMatrix = new float[16];
+            Matrix.setIdentityM(modelMatrix, 0);
+            Matrix.translateM(modelMatrix, 0, 0.0f, 0.0f, UI_DISTANCE);
+
+            imageManager = new OpenGLImageManager(bitmapList, textureVertexShader, textureFragmentShader, modelMatrix);
+            currentImage = 0;
+            bitmapListCreated = false;
+        }
 
         // See if we're looking at things:
         Matrix.multiplyMM(viewMatrix, 0, headView, 0, camera, 0);
@@ -167,11 +182,10 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         octogon1.updateBeingLookedAt(viewMatrix, 0.1f, 0.1f, time, this, 1);
         octogon2.updateBeingLookedAt(viewMatrix, 0.1f, 0.1f, time, this, 2);
 
+        // TODO: Update headRotation???
         // Update the 3d audio engine with the most recent head rotation.
         headTransform.getQuaternion(headRotation, 0);
-        gvrAudioEngine.setHeadRotation(
-                headRotation[0], headRotation[1], headRotation[2], headRotation[3]);
-        // Regular update call to GVR audio engine.
+        gvrAudioEngine.setHeadRotation(headRotation[0], headRotation[1], headRotation[2], headRotation[3]);
         gvrAudioEngine.update();
 
         Utility.checkGLError(TAG, "onReadyToDraw");
@@ -179,7 +193,7 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
 
     /**
      * Called twice every frame (to draw each eye's viewMatrix).
-     * @param eye
+     * @param eye - describes the orientation of the eye
      */
     @Override
     public void onDrawEye(Eye eye) {
@@ -200,7 +214,8 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         float zFar = 100f;
         float[] perspective = eye.getPerspective(zNear, zFar);
 
-        square.draw(viewMatrix, perspective, lightPosInEyeSpace);
+        if (imageManager != null)
+            imageManager.squares.get(currentImage).draw(viewMatrix, perspective, lightPosInEyeSpace);
         floor.draw(viewMatrix, perspective, lightPosInEyeSpace);
         octogon1.draw(viewMatrix, perspective, lightPosInEyeSpace);
         octogon2.draw(viewMatrix, perspective, lightPosInEyeSpace);
@@ -243,16 +258,8 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         int colourVertexShader = loadGLShader(GLES20.GL_VERTEX_SHADER, R.raw.light_vertex);
         int passthroughFragmentShader = loadGLShader(GLES20.GL_FRAGMENT_SHADER, R.raw.passthrough_fragment);
         int gridFragmentShader = loadGLShader(GLES20.GL_FRAGMENT_SHADER, R.raw.grid_fragment);
-        int textureVertexShader = loadGLShader(GLES20.GL_VERTEX_SHADER, R.raw.texture_vertex);
-        int textureFragmentShader = loadGLShader(GLES20.GL_FRAGMENT_SHADER, R.raw.texture_fragment);
-
-        square = new OpenGLGeometryHelper(WorldData.SQUARE_COORDS, WorldData.SQUARE_NORMALS, textureVertexShader, textureFragmentShader, "Square1");
-        Matrix.setIdentityM(square.modelMatrix, 0);
-        Matrix.translateM(square.modelMatrix, 0, 0.0f, 0.0f, UI_DISTANCE);
-        Bitmap bitmap = bitmapFromResource(R.drawable.texture);
-        int texture = loadTexture(bitmap);
-        bitmap.recycle();
-        square.setTexture(texture, WorldData.SQUARE_TEXTURE_COORDS);
+        textureVertexShader = loadGLShader(GLES20.GL_VERTEX_SHADER, R.raw.texture_vertex);
+        textureFragmentShader = loadGLShader(GLES20.GL_FRAGMENT_SHADER, R.raw.texture_fragment);
 
         octogon1 = new OpenGLGeometryHelper(WorldData.OCTOGON_COORDS, WorldData.OCTOGON_NORMALS, colourVertexShader, passthroughFragmentShader, "Octogon1");
         Matrix.setIdentityM(octogon1.modelMatrix, 0);
@@ -289,28 +296,29 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
 
         // updateModelPosition();
 
+
         // Should we do something else here?
         Utility.checkGLError(TAG, "onSurfaceCreated");
     }
 
-    /**
-     * Updates the cube model position.
-     */
-    protected void updateModelPosition() {
-        Matrix.setIdentityM(square.modelMatrix, 0);
-        Matrix.translateM(square.modelMatrix, 0, modelPosition[0], modelPosition[1], modelPosition[2]);
-
-        Matrix.setIdentityM(octogon1.modelMatrix, 0);
-        //Matrix.scaleM(modelOctogon, 0, 0.2f, 0.2f, 0.2f);
-        Matrix.translateM(octogon1.modelMatrix, 0, modelPosition[0] + 2, modelPosition[1], modelPosition[2]);
-
-        // Update the sound location to match it with the new cube position.
-        if (soundId != GvrAudioEngine.INVALID_ID) {
-            gvrAudioEngine.setSoundObjectPosition(
-                    soundId, modelPosition[0], modelPosition[1], modelPosition[2]);
-        }
-        Utility.checkGLError(TAG, "updateCubePosition");
-    }
+//    /**
+//     * Updates the cube model position.
+//     */
+//    protected void updateModelPosition() {
+//        Matrix.setIdentityM(square.modelMatrix, 0);
+//        Matrix.translateM(square.modelMatrix, 0, modelPosition[0], modelPosition[1], modelPosition[2]);
+//
+//        Matrix.setIdentityM(octogon1.modelMatrix, 0);
+//        //Matrix.scaleM(modelOctogon, 0, 0.2f, 0.2f, 0.2f);
+//        Matrix.translateM(octogon1.modelMatrix, 0, modelPosition[0] + 2, modelPosition[1], modelPosition[2]);
+//
+//        // Update the sound location to match it with the new cube position.
+//        if (soundId != GvrAudioEngine.INVALID_ID) {
+//            gvrAudioEngine.setSoundObjectPosition(
+//                    soundId, modelPosition[0], modelPosition[1], modelPosition[2]);
+//        }
+//        Utility.checkGLError(TAG, "updateCubePosition");
+//    }
 
     @Override
     public void onRendererShutdown() {
@@ -360,6 +368,11 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         Matrix.invertM(camera, 0, headView, 0);
         Matrix.rotateM(camera, 0, 180, 0.0f, 1.0f, 0.0f);
 
+
+        // Pick a folder to view images from.
+        Intent pickFolderIntent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        startActivityForResult(pickFolderIntent, 1);
+
         // Always give user feedback.
         vibrator.vibrate(50);
     }
@@ -369,41 +382,15 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         switch (identifier) {
             case 1:
                 Log.i(TAG, "Previous Photo");
-                bitmapCurrent = Math.max(0, bitmapCurrent - 1);
-                square.setTexture(loadTexture(bitmapCache.get(bitmapCurrent)), WorldData.SQUARE_TEXTURE_COORDS);
+                currentImage = Math.max(0, currentImage - 1);
                 break;
             case 2:
                 Log.i(TAG, "Next Photo");
-                bitmapCurrent = Math.min(bitmapCache.size() - 1, bitmapCurrent + 1);
-                square.setTexture(loadTexture(bitmapCache.get(bitmapCurrent)), WorldData.SQUARE_TEXTURE_COORDS);
+                currentImage = Math.min(imageManager.numberOfImages() - 1, currentImage + 1);
                 break;
             default:
                 Log.i(TAG, "Unknown Callback ID");
         }
-    }
-
-    public int loadTexture(Bitmap bitmap) {
-        final int[] textureHandle = new int[1];
-
-        GLES20.glGenTextures(1, textureHandle, 0);
-
-        if (textureHandle[0] != 0) {
-            // Bind to the texture in OpenGL
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureHandle[0]);
-
-            // Set filtering
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST);
-
-            // Load the bitmap into the bound texture.
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0);
-        }
-
-        if (textureHandle[0] == 0) {
-            throw new RuntimeException("Error loading texture.");
-        }
-
-        return textureHandle[0];
     }
 
     public Bitmap bitmapFromResource(int resourceId) {
@@ -413,7 +400,6 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         // Read in the resource
         return BitmapFactory.decodeResource(getResources(), resourceId, options);
     }
-
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -426,7 +412,7 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
                 DocumentFile[] files = folder.listFiles();
 
                 // Create a cache to store some of the images in the folder.
-                bitmapCache = new LinkedList<Bitmap>();
+                bitmapList = new LinkedList<>();
                 imagesInFolder = 0;
 
                 // Go through each file.
@@ -435,11 +421,11 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
                     // If it's an image, add it to the cache (if not full)
                     if (file.isFile() && file.getType().startsWith("image/")) {
                         imagesInFolder++;
-                        if (bitmapCache.size() <= BITMAP_CACHE_SIZE) {
+                        if (bitmapList.size() < MAX_IMAGES_LOADED) {
                             try {
                                 InputStream inputStream = getContentResolver().openInputStream(file.getUri());
                                 Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
-                                bitmapCache.add(bitmap);
+                                bitmapList.add(bitmap);
 
                             } catch (FileNotFoundException e) {
                                 e.printStackTrace();
@@ -447,15 +433,15 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
                         }
                     }
                 }
-
-                if (bitmapCache.size() >= 1) {
-                    bitmapCacheStart = 1;
-                    bitmapCurrent = 1;
-                }
-                else {
-                    bitmapCacheStart = 0;
-                    bitmapCurrent = 0;
-                }
+                bitmapListCreated = true;
+//                if (bitmapsInCache >= 1) {
+//                    bitmapCacheStart = 1;
+//                    bitmapCurrent = 1;
+//                }
+//                else {
+//                    bitmapCacheStart = 0;
+//                    bitmapCurrent = 0;
+//                }
             }
         }
     }
