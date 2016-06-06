@@ -171,7 +171,7 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
             Matrix.setIdentityM(modelMatrix, 0);
             Matrix.translateM(modelMatrix, 0, 0.0f, 0.0f, UI_DISTANCE);
 
-            imageManager = new OpenGLImageManager(bitmapList, textureVertexShader, textureFragmentShader, modelMatrix);
+            imageManager= new OpenGLImageManager(bitmapList, textureVertexShader, textureFragmentShader, modelMatrix);
             currentImage = 0;
             bitmapListCreated = false;
         }
@@ -402,46 +402,49 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     }
 
     @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+    protected void onActivityResult(int requestCode, int resultCode, final Intent data) {
         // User has selected (or perhaps not) a folder.
         if (requestCode == 1) {
             // Check to see if the user selected a folder (they could have pressed back)
             if (resultCode == RESULT_OK) {
-                // Get the folder that they picked, and all the files in it.
-                DocumentFile folder = DocumentFile.fromTreeUri(getApplicationContext(), data.getData());
-                DocumentFile[] files = folder.listFiles();
+                // Load images in new thread (to stop the UI from hanging).
+                new Thread(new Runnable() {
+                    public void run() {
+                        // Get the folder that they picked, and all the files in it.
+                        DocumentFile folder = DocumentFile.fromTreeUri(getApplicationContext(), data.getData());
+                        DocumentFile[] files = folder.listFiles();
 
-                // Create a cache to store some of the images in the folder.
-                bitmapList = new LinkedList<>();
-                imagesInFolder = 0;
+                        // Create a cache to store some of the images in the folder.
+                        bitmapList = new LinkedList<>();
+                        imagesInFolder = 0;
 
-                // Go through each file.
-                for (int i = 0; i < files.length; i++) {
-                    DocumentFile file = files[i];
-                    // If it's an image, add it to the cache (if not full)
-                    if (file.isFile() && file.getType().startsWith("image/")) {
-                        imagesInFolder++;
-                        if (bitmapList.size() < MAX_IMAGES_LOADED) {
-                            try {
-                                InputStream inputStream = getContentResolver().openInputStream(file.getUri());
-                                Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
-                                bitmapList.add(bitmap);
+                        // Go through each file.
+                        for (int i = 0; i < files.length; i++) {
+                            DocumentFile file = files[i];
+                            // If it's an image, add it to the cache (if not full)
+                            if (file.isFile() && file.getType().startsWith("image/")) {
+                                imagesInFolder++;
+                                if (bitmapList.size() < MAX_IMAGES_LOADED) {
+                                    try {
+                                        InputStream inputStream = getContentResolver().openInputStream(file.getUri());
+                                        Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+                                        bitmapList.add(bitmap);
 
-                            } catch (FileNotFoundException e) {
-                                e.printStackTrace();
+                                    } catch (FileNotFoundException e) {
+                                        e.printStackTrace();
+                                    }
+                                }
                             }
                         }
+
+                        // Set the boolean in one (atomic) operation.
+                        // Doing this last prevents onNewFrame from picking up that we are done before
+                        // all other variables have been set.
+                        // NOTE: bitmapListCreated is not volatile: i.e. there may be some
+                        // delay before this new variable is synced with the UI (main) thread.
+                        bitmapListCreated = true;
                     }
-                }
-                bitmapListCreated = true;
-//                if (bitmapsInCache >= 1) {
-//                    bitmapCacheStart = 1;
-//                    bitmapCurrent = 1;
-//                }
-//                else {
-//                    bitmapCacheStart = 0;
-//                    bitmapCurrent = 0;
-//                }
+                }).start();
             }
         }
     }
