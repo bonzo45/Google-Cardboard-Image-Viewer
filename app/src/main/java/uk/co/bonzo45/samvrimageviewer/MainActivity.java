@@ -171,7 +171,7 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
             Matrix.setIdentityM(modelMatrix, 0);
             Matrix.translateM(modelMatrix, 0, 0.0f, 0.0f, UI_DISTANCE);
 
-            imageManager= new OpenGLImageManager(bitmapList, textureVertexShader, textureFragmentShader, modelMatrix);
+            imageManager = new OpenGLImageManager(bitmapList, textureVertexShader, textureFragmentShader, modelMatrix);
             currentImage = 0;
             bitmapListCreated = false;
         }
@@ -428,7 +428,8 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
                                     try {
                                         InputStream inputStream = getContentResolver().openInputStream(file.getUri());
                                         Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
-                                        bitmapList.add(bitmap);
+                                        Bitmap scaledBitmap = Bitmap.createScaledBitmap(bitmap, 800, 800, true);
+                                        bitmapList.add(scaledBitmap);
 
                                     } catch (FileNotFoundException e) {
                                         e.printStackTrace();
