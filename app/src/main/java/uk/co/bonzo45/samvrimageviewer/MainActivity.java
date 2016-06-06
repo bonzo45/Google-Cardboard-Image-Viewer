@@ -18,6 +18,7 @@ import com.google.vr.sdk.base.Eye;
 import com.google.vr.sdk.base.GvrActivity;
 import com.google.vr.sdk.base.GvrView;
 import com.google.vr.sdk.base.HeadTransform;
+import com.google.vr.sdk.base.ScreenParams;
 import com.google.vr.sdk.base.Viewport;
 
 import java.io.FileNotFoundException;
@@ -77,6 +78,10 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     List<Bitmap> bitmapList;
     boolean bitmapListCreated;
 
+    // Screen Dimensions
+    private int screenWidth;
+    private int screenHeight;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         Log.i(TAG, "onCreate called.");
@@ -122,6 +127,9 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
                     }
                 });
         setGvrView(gvrView);
+        ScreenParams screenParams = gvrView.getScreenParams();
+        screenWidth = screenParams.getWidth();
+        screenHeight = screenParams.getHeight();
     }
 
     /**
@@ -240,6 +248,8 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     @Override
     public void onSurfaceChanged(int i, int i1) {
         Log.i(TAG, "onSurfaceChanged");
+        screenWidth = i;
+        screenHeight = i1;
     }
 
     /**
@@ -428,7 +438,7 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
                                     try {
                                         InputStream inputStream = getContentResolver().openInputStream(file.getUri());
                                         Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
-                                        Bitmap scaledBitmap = Bitmap.createScaledBitmap(bitmap, 800, 800, true);
+                                        Bitmap scaledBitmap = Bitmap.createScaledBitmap(bitmap, screenWidth, screenHeight / 2, true);
                                         bitmapList.add(scaledBitmap);
 
                                     } catch (FileNotFoundException e) {
