@@ -67,7 +67,6 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     private Vibrator vibrator;
 
     // Images
-    private int imagesInFolder;
     OpenGLImageManager imageManager;
     private int currentImage;
 
@@ -81,6 +80,8 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
     // Screen Dimensions
     private int screenWidth;
     private int screenHeight;
+
+    List<DocumentFile> imagesInFolder;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -222,8 +223,8 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
         float zFar = 100f;
         float[] perspective = eye.getPerspective(zNear, zFar);
 
-        if (imageManager != null)
-            imageManager.squares.get(currentImage).draw(viewMatrix, perspective, lightPosInEyeSpace);
+        if (imageManager != null && imagesInFolder.size() > 0)
+            imageManager.squares.get(Math.min(imagesInFolder.size() - 1, 1)).draw(viewMatrix, perspective, lightPosInEyeSpace);
         floor.draw(viewMatrix, perspective, lightPosInEyeSpace);
         octogon1.draw(viewMatrix, perspective, lightPosInEyeSpace);
         octogon2.draw(viewMatrix, perspective, lightPosInEyeSpace);
@@ -389,18 +390,34 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
 
     @Override
     public void handleCallback(int identifier) {
-        switch (identifier) {
-            case 1:
-                Log.i(TAG, "Previous Photo");
-                currentImage = Math.max(0, currentImage - 1);
-                break;
-            case 2:
-                Log.i(TAG, "Next Photo");
-                currentImage = Math.min(imageManager.numberOfImages() - 1, currentImage + 1);
-                break;
-            default:
-                Log.i(TAG, "Unknown Callback ID");
+        try {
+            switch (identifier) {
+                case 1:
+                    Log.i(TAG, "Previous Photo");
+                    if (currentImage > 0) {
+                        // TODO: Not done on separate thread! Slow!
+                        imageManager.pushToStart(-1, bitmapFromFile(imagesInFolder.get(currentImage - 1)), textureVertexShader, textureFragmentShader);
+                    }
+                    currentImage = Math.max(0, currentImage - 1);
+                    break;
+                case 2:
+                    Log.i(TAG, "Next Photo");
+                    if (currentImage + MAX_IMAGES_LOADED - 1 < imagesInFolder.size() - 1) {
+                        // TODO: Not done on separate thread! Slow!
+                        imageManager.pushToStart(MAX_IMAGES_LOADED, bitmapFromFile(imagesInFolder.get(currentImage + MAX_IMAGES_LOADED - 1)), textureVertexShader, textureFragmentShader);
+                    }
+                    currentImage = Math.min(imagesInFolder.size() - 1, currentImage + 1);
+                    break;
+                default:
+                    Log.i(TAG, "Unknown Callback ID");
+            }
+        } catch (FileNotFoundException e) {
+            // The picture has been deleted since we read the directory first.
+            e.printStackTrace();
+            imagesInFolder.remove(currentImage);
         }
+
+        Log.i(TAG, "Current Image: " + currentImage);
     }
 
     public Bitmap bitmapFromResource(int resourceId) {
@@ -420,43 +437,49 @@ public class MainActivity extends GvrActivity implements GvrView.StereoRenderer,
                 // Load images in new thread (to stop the UI from hanging).
                 new Thread(new Runnable() {
                     public void run() {
-                        // Get the folder that they picked, and all the files in it.
-                        DocumentFile folder = DocumentFile.fromTreeUri(getApplicationContext(), data.getData());
-                        DocumentFile[] files = folder.listFiles();
+                    // Get the folder that they picked, and all the files in it.
+                    DocumentFile folder = DocumentFile.fromTreeUri(getApplicationContext(), data.getData());
+                    DocumentFile[] files = folder.listFiles();
 
-                        // Create a cache to store some of the images in the folder.
-                        bitmapList = new LinkedList<>();
-                        imagesInFolder = 0;
+                    // Create a cache to store some of the images in the folder.
+                    bitmapList = new LinkedList<>();
+                    imagesInFolder = new LinkedList<>();
 
-                        // Go through each file.
-                        for (int i = 0; i < files.length; i++) {
-                            DocumentFile file = files[i];
-                            // If it's an image, add it to the cache (if not full)
-                            if (file.isFile() && file.getType().startsWith("image/")) {
-                                imagesInFolder++;
-                                if (bitmapList.size() < MAX_IMAGES_LOADED) {
-                                    try {
-                                        InputStream inputStream = getContentResolver().openInputStream(file.getUri());
-                                        Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
-                                        Bitmap scaledBitmap = Bitmap.createScaledBitmap(bitmap, screenWidth, screenHeight / 2, true);
-                                        bitmapList.add(scaledBitmap);
-
-                                    } catch (FileNotFoundException e) {
-                                        e.printStackTrace();
-                                    }
+                    // Go through each file.
+                    for (int i = 0; i < files.length; i++) {
+                        DocumentFile file = files[i];
+                        // If it's an image, add it to the cache (if not full)
+                        if (file.isFile() && file.getType().startsWith("image/")) {
+                            imagesInFolder.add(file);
+                            if (bitmapList.size() < MAX_IMAGES_LOADED) {
+                                try {
+                                    bitmapList.add(bitmapFromFile(file));
+                                } catch (FileNotFoundException e) {
+                                    // If the file can't be found (perhaps it has been deleted
+                                    // since we read the directories contents)
+                                    // Print the stack trace and remove it from the list of images.
+                                    e.printStackTrace();
+                                    imagesInFolder.remove(file);
                                 }
                             }
                         }
+                    }
 
-                        // Set the boolean in one (atomic) operation.
-                        // Doing this last prevents onNewFrame from picking up that we are done before
-                        // all other variables have been set.
-                        // NOTE: bitmapListCreated is not volatile: i.e. there may be some
-                        // delay before this new variable is synced with the UI (main) thread.
-                        bitmapListCreated = true;
+                    // Set the boolean in one (atomic) operation.
+                    // Doing this last prevents onNewFrame from picking up that we are done before
+                    // all other variables have been set.
+                    // NOTE: bitmapListCreated is not volatile: i.e. there may be some
+                    // delay before this new variable is synced with the UI (main) thread.
+                    bitmapListCreated = true;
                     }
                 }).start();
             }
         }
+    }
+
+    public Bitmap bitmapFromFile(DocumentFile file) throws FileNotFoundException {
+        InputStream inputStream = getContentResolver().openInputStream(file.getUri());
+        Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+        return Bitmap.createScaledBitmap(bitmap, screenWidth, screenHeight / 2, true);
     }
 }
